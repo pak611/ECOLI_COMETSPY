@@ -1,0 +1,140 @@
+
+#%%
+import cobra
+import cobra.io
+
+#%%
+# Define a function to print the model information
+def print_model_info(model, logfile_path):
+    with open(logfile_path, 'w') as logfile:
+        # Function to print within the with statement context
+        def print_to_log(*args, **kwargs):
+            print(*args, file=logfile, **kwargs)
+        
+        # Log model validation errors if there are any
+        if errors:
+            print_to_log("Model validation errors:")
+            for error in errors:
+                print_to_log(error)
+            print_to_log("-" * 40)
+
+        # Print gene information
+        for gene in model.genes:
+            print_to_log("Gene ID:", gene.id)
+            print_to_log("Name:", gene.name)
+            print_to_log("Functional:", not gene.functional)
+            print_to_log("Reactions:", [reaction.id for reaction in gene.reactions])
+            print_to_log("-" * 20)
+
+        # Print basic information about the model
+        print_to_log("Reactions:", len(model.reactions))
+        print_to_log("Metabolites:", len(model.metabolites))
+        print_to_log("Genes:", len(model.genes))
+
+        # List some of the reactions and metabolites
+        print_to_log("First 10 reactions:", model.reactions[:10])  # print the first 10 reactions
+        print_to_log("First 10 metabolites:", model.metabolites[:10])  # print the first 10 metabolites
+
+        # Perform Flux Balance Analysis (FBA)
+        solution = model.optimize()
+        print_to_log("Growth rate:", solution.objective_value)
+
+# Load and validate the model
+model_path = '/Users/patrickkampmeyer/Desktop/MODEL1507180060_url.xml'
+(model, errors) = cobra.io.validate_sbml_model(model_path)
+
+# Define the path for the logfile
+logfile_path = '/Users/patrickkampmeyer/Desktop/model_info_log.txt'
+
+# Call the function with the model and the path to the logfile
+#rint_model_info(model, logfile_path)
+
+
+reaction = model.reactions.get_by_id("DURIPP")
+for met, stoich_coeff in reaction.metabolites.items():
+    print(met.id, stoich_coeff)
+
+stoichiometric_matrix = cobra.util.create_stoichiometric_matrix(model)
+print(stoichiometric_matrix)
+
+print('stop here')
+
+
+external_metabolites = [met for met in model.metabolites if met.compartment == 'e']
+
+print(external_metabolites)
+
+print('stop here')
+
+# Initialize lists for inputs and outputs
+inputs = []
+outputs = []
+
+# Iterate through the exchange reactions to determine inputs and outputs
+for reaction in model.exchanges:
+    if reaction.lower_bound < 0 and reaction.upper_bound <= 0:
+        # This reaction can only consume metabolite, hence it's an input
+        inputs.append(reaction.id)
+    elif reaction.lower_bound >= 0 and reaction.upper_bound > 0:
+        # This reaction can only secrete metabolite, hence it's an output
+        outputs.append(reaction.id)
+    elif reaction.lower_bound < 0 and reaction.upper_bound > 0:
+        # This reaction can both consume and secrete metabolite
+        # The actual direction would depend on the conditions of the simulation
+        inputs.append(reaction.id)
+        outputs.append(reaction.id)
+
+# Print inputs and outputs
+print("Inputs:", inputs)
+print("Outputs:", outputs)
+
+
+#%%
+
+# Set the bounds for the exchange reaction for glucose
+model.reactions.get_by_id("DURIPP").lower_bound = -10.0  # simulate 10 mmol/gDW/hr glucose uptake
+
+# Perform Flux Balance Analysis (FBA)
+solution = model.optimize()
+print('Growth rate with 10 mmol/gDW/hr glucose:', solution.objective_value)
+
+
+import cometspy as c
+
+# Define a dictionary with your initial conditions (concentrations in mmol)
+# These are just example values; you'll need to adjust them based on your experimental setup
+initial_conditions = {
+    'EX_co2_e': 10,   # e.g., 10 mM
+    'EX_fe2_e': 10,   # e.g., 10 µM, remember to convert to mM if necessary
+    'EX_glc__D_e': 1, # e.g., 1 mM
+    'EX_h2o_e': 1000, # e.g., 1 M (assuming abundant water)
+    'EX_h_e': 10,     # e.g., pH ~7.0, convert to [H+] concentration if necessary
+    'EX_k_e': 10,     # e.g., 10 mM
+    'EX_na1_e': 10,   # e.g., 10 mM
+    'EX_nh4_e': 10,   # e.g., 10 mM
+    'EX_o2_e': 10,    # e.g., 10 mM, adjust based on solubility
+    'EX_pi_e': 10,    # e.g., 10 mM
+    'EX_so4_e': 10    # e.g., 10 mM
+}
+
+# Create a layout with this model
+layout = c.layout(model)
+
+# Set the initial conditions in the layout
+for exchange_reaction, concentration in initial_conditions.items():
+    layout.set_specific_metabolite(exchange_reaction, concentration)
+
+
+# Define simulation parameters
+params = c.params()
+params.all_params["time_step"] = 0.1 # Set the time step to 0.1 hours
+params.all_params["max_time"] = 10.0 # Set the simulation time to 10 hours
+params.all_params["writeBiomassLog"] = True # Write the biomass log
+
+
+# Create a COMETS simulation object
+sim = c.comets(layout, params)
+
+# Run the simulation
+sim.run()
+# %%
